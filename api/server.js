@@ -12,12 +12,13 @@ const server = fastify({
   },
 });
 
-const PORT = process.env.PORT || 3000;
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = await AsyncDatabase.open("./pizza.sqlite");
+let db;
+async function initDb() {
+  db = await AsyncDatabase.open("./pizza.sqlite");
+}
 
 server.register(fastifyStatic, {
   root: path.join(__dirname, "public"),
@@ -32,14 +33,10 @@ server.get("/api/pizzas", async function getPizzas(req, res) {
     `SELECT 
       pizza_type_id as id, size, price
     FROM 
-      pizzas
-  `
+      pizzas`
   );
 
-  const [pizzas, pizzaSizes] = await Promise.all([
-    pizzasPromise,
-    pizzaSizesPromise,
-  ]);
+  const [pizzas, pizzaSizes] = await Promise.all([pizzasPromise, pizzaSizesPromise]);
 
   const responsePizzas = pizzas.map((pizza) => {
     const sizes = pizzaSizes.reduce((acc, current) => {
@@ -61,45 +58,6 @@ server.get("/api/pizzas", async function getPizzas(req, res) {
   res.send(responsePizzas);
 });
 
-server.get("/api/pizza-of-the-day", async function getPizzaOfTheDay(req, res) {
-  const pizzas = await db.all(
-    `SELECT 
-      pizza_type_id as id, name, category, ingredients as description
-    FROM 
-      pizza_types`
-  );
-
-  const daysSinceEpoch = Math.floor(Date.now() / 86400000);
-  const pizzaIndex = daysSinceEpoch % pizzas.length;
-  const pizza = pizzas[pizzaIndex];
-
-  const sizes = await db.all(
-    `SELECT
-      size, price
-    FROM
-      pizzas
-    WHERE
-      pizza_type_id = ?`,
-    [pizza.id]
-  );
-
-  const sizeObj = sizes.reduce((acc, current) => {
-    acc[current.size] = +current.price;
-    return acc;
-  }, {});
-
-  const responsePizza = {
-    id: pizza.id,
-    name: pizza.name,
-    category: pizza.category,
-    description: pizza.description,
-    image: `/public/pizzas/${pizza.id}.webp`,
-    sizes: sizeObj,
-  };
-
-  res.send(responsePizza);
-});
-
 server.get("/api/orders", async function getOrders(req, res) {
   const id = req.query.id;
   const orders = await db.all("SELECT order_id, date, time FROM orders");
@@ -111,7 +69,7 @@ server.get("/api/order", async function getOrders(req, res) {
   const id = req.query.id;
   const orderPromise = db.get(
     "SELECT order_id, date, time FROM orders WHERE order_id = ?",
-    [id]
+    [id],
   );
   const orderItemsPromise = db.all(
     `SELECT 
@@ -128,7 +86,7 @@ server.get("/api/order", async function getOrders(req, res) {
       p.pizza_type_id = t.pizza_type_id
     WHERE 
       order_id = ?`,
-    [id]
+    [id],
   );
 
   const [order, orderItemsRes] = await Promise.all([
@@ -141,7 +99,7 @@ server.get("/api/order", async function getOrders(req, res) {
       image: `/public/pizzas/${item.pizzaTypeId}.webp`,
       quantity: +item.quantity,
       price: +item.price,
-    })
+    }),
   );
 
   const total = orderItems.reduce((acc, item) => acc + item.total, 0);
@@ -170,7 +128,7 @@ server.post("/api/order", async function createOrder(req, res) {
 
     const result = await db.run(
       "INSERT INTO orders (date, time) VALUES (?, ?)",
-      [date, time]
+      [date, time],
     );
     const orderId = result.lastID;
 
@@ -195,7 +153,7 @@ server.post("/api/order", async function createOrder(req, res) {
       const { pizzaId, quantity } = item;
       await db.run(
         "INSERT INTO order_details (order_id, pizza_id, quantity) VALUES (?, ?, ?)",
-        [orderId, pizzaId, quantity]
+        [orderId, pizzaId, quantity],
       );
     }
 
@@ -217,7 +175,7 @@ server.get("/api/past-orders", async function getPastOrders(req, res) {
     const offset = (page - 1) * limit;
     const pastOrders = await db.all(
       "SELECT order_id, date, time FROM orders ORDER BY order_id DESC LIMIT 10 OFFSET ?",
-      [offset]
+      [offset],
     );
     res.send(pastOrders);
   } catch (error) {
@@ -232,7 +190,7 @@ server.get("/api/past-order/:order_id", async function getPastOrder(req, res) {
   try {
     const order = await db.get(
       "SELECT order_id, date, time FROM orders WHERE order_id = ?",
-      [orderId]
+      [orderId],
     );
 
     if (!order) {
@@ -255,7 +213,7 @@ server.get("/api/past-order/:order_id", async function getPastOrder(req, res) {
         p.pizza_type_id = t.pizza_type_id
       WHERE 
         order_id = ?`,
-      [orderId]
+      [orderId],
     );
 
     const formattedOrderItems = orderItems.map((item) =>
@@ -263,12 +221,12 @@ server.get("/api/past-order/:order_id", async function getPastOrder(req, res) {
         image: `/public/pizzas/${item.pizzaTypeId}.webp`,
         quantity: +item.quantity,
         price: +item.price,
-      })
+      }),
     );
 
     const total = formattedOrderItems.reduce(
       (acc, item) => acc + item.total,
-      0
+      0,
     );
 
     res.send({
